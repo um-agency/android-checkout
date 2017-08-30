@@ -21,19 +21,20 @@
  */
 
 apply plugin: 'com.android.library'
-apply plugin: 'maven'
-apply plugin: 'signing'
 
 android {
-    compileSdkVersion versions.sdk.compile
-    buildToolsVersion versions.sdk.buildTools
+    compileSdkVersion 25
+    buildToolsVersion '25.0.3'
+
     defaultConfig {
-        minSdkVersion versions.sdk.min
-        targetSdkVersion versions.sdk.target
-        versionCode versions.code
-        versionName versions.name
+        minSdkVersion 16
+        //noinspection OldTargetApi
+        targetSdkVersion 25
+        versionCode 101
+        versionName '1.0.1'
         consumerProguardFiles 'proguard-rules.txt'
     }
+
     lintOptions {
         abortOnError false
     }
@@ -41,90 +42,20 @@ android {
 
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
+    //noinspection NewerVersionAvailable
     compile 'com.google.code.findbugs:jsr305:2.0.3'
 
+    //noinspection NewerVersionAvailable
     testCompile 'junit:junit:4.12'
+    //noinspection NewerVersionAvailable
     testCompile 'org.robolectric:robolectric:3.0'
-    testCompile "org.mockito:mockito-all:1.9.5"
-    testCompile "org.skyscreamer:jsonassert:1.2.3"
+    //noinspection NewerVersionAvailable
+    testCompile 'org.mockito:mockito-all:1.9.5'
+    //noinspection NewerVersionAvailable
+    testCompile 'org.skyscreamer:jsonassert:1.2.3'
 }
 
 tasks.withType(Test) {
     scanForTestClasses = false
-    include "**/*Test.class"
-}
-
-task androidJavadocs(type: Javadoc) {
-    failOnError = false
-    source = android.sourceSets.main.java.srcDirs
-    classpath += project.files(android.getBootClasspath().join(File.pathSeparator))
-    configurations.compile.each { File file -> classpath += project.files(file.path) }
-}
-
-task androidJavadocsJar(type: Jar, dependsOn: androidJavadocs) {
-    classifier = 'javadoc'
-    from androidJavadocs.destinationDir
-}
-
-task androidSourcesJar(type: Jar) {
-    classifier = 'sources'
-    from android.sourceSets.main.java.srcDirs
-}
-
-artifacts {
-    archives androidSourcesJar
-    archives androidJavadocsJar
-}
-
-signing {
-    sign configurations.archives
-}
-
-group = "org.solovyev.android"
-version = android.defaultConfig.versionName
-
-uploadArchives {
-    repositories {
-        mavenDeployer {
-            beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
-
-            repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
-                authentication(userName: ossrhUsername, password: ossrhPassword)
-            }
-
-            snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
-                authentication(userName: ossrhUsername, password: ossrhPassword)
-            }
-
-            pom.project {
-                artifactId = 'checkout'
-                name 'Android Checkout Library'
-                packaging 'aar'
-                description 'Library for Android In-App Billing (Version 3)'
-                url 'https://github.com/serso/android-checkout'
-
-                scm {
-                    url 'https://github.com/serso/android-checkout'
-                    connection 'scm:https://serso@github.com/serso/android-checkout.git'
-                    developerConnection 'scm:git://github.com/serso/android-checkout.git'
-                }
-
-                licenses {
-                    license {
-                        name 'The Apache Software License, Version 2.0'
-                        url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
-                        distribution 'repo'
-                    }
-                }
-
-                developers {
-                    developer {
-                        id 'se.solovyev'
-                        name 'Sergey Solovyev'
-                        email 'se.solovyev@gmail.com'
-                    }
-                }
-            }
-        }
-    }
+    include '**/*Test.class'
 }

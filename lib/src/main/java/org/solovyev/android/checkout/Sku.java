@@ -22,10 +22,12 @@
 
 package org.solovyev.android.checkout;
 
+import android.text.TextUtils;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import android.text.TextUtils;
+import java.io.Serializable;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -35,7 +37,7 @@ import javax.annotation.concurrent.Immutable;
  * SKU object as described <a href="http://developer.android.com/google/play/billing/billing_reference.html#product-details-table">here</a>
  */
 @Immutable
-public final class Sku {
+public final class Sku implements Serializable {
 
     @Nonnull
     public final Id id;
@@ -56,24 +58,69 @@ public final class Sku {
     @Nonnull
     public final String description;
 
+    // Subscription period specified in ISO 8601 format, for example, P1W equates to one week
+    @Nullable
+    public final String subscriptionPeriod;
+
+    // Free trial period specified in ISO 8601 format
+    @Nullable
+    public final String freeTrialPeriod;
+
+    @Nullable
+    private final String introductoryPriceOriginal;
+
+    @Nullable
+    public final Price introductoryPrice;
+
+    // Introductory price period specified in ISO 8601 format
+    @Nullable
+    public final String introductoryPricePeriod;
+
+    public final int introductoryPriceCycles;
+
     @Nullable
     private String mDisplayTitle;
 
-    public Sku(@Nonnull String product, @Nonnull String code, @Nonnull String price, @Nonnull Price detailedPrice, @Nonnull String title, @Nonnull String description) {
+    public Sku(
+            @Nonnull String product,
+            @Nonnull String code,
+            @Nonnull String price,
+            @Nonnull Price detailedPrice,
+            @Nonnull String title,
+            @Nonnull String description,
+            @Nullable Price introductoryPrice,
+            @Nullable String subscriptionPeriod,
+            @Nullable String freeTrialPeriod,
+            @Nullable String introductoryPricePeriod
+    ) {
         this.id = new Id(product, code);
         this.price = price;
         this.detailedPrice = detailedPrice;
         this.title = title;
         this.description = description;
+        this.introductoryPrice = introductoryPrice;
+        this.subscriptionPeriod = subscriptionPeriod;
+        this.freeTrialPeriod = freeTrialPeriod;
+        this.introductoryPricePeriod = introductoryPricePeriod;
+        // TODO Pass through constructor
+        this.introductoryPriceOriginal = null;
+        this.introductoryPriceCycles = 0;
     }
 
     Sku(@Nonnull String json, @Nonnull String product) throws JSONException {
+        // https://developer.android.com/google/play/billing/billing_reference.html#getSkuDetails
         final JSONObject object = new JSONObject(json);
         id = new Id(product, object.getString("productId"));
         price = object.getString("price");
-        detailedPrice = Price.fromJson(object);
+        detailedPrice = Price.regularPriceFromJson(object);
         title = object.getString("title");
         description = object.optString("description");
+        subscriptionPeriod = object.optString("subscriptionPeriod", null);
+        introductoryPriceOriginal = object.optString("introductoryPrice", null);
+        introductoryPrice = Price.introductoryPriceFromJson(object);
+        freeTrialPeriod = object.optString("freeTrialPeriod", null);
+        introductoryPricePeriod = object.optString("introductoryPricePeriod", null);
+        introductoryPriceCycles = object.optInt("introductoryPriceCycles", -1);
     }
 
     @Nonnull
@@ -87,14 +134,26 @@ public final class Sku {
     }
 
     @Nonnull
-    private JSONObject toJsonObject() throws JSONException {
+    public JSONObject toJsonObject() throws JSONException {
+        // https://developer.android.com/google/play/billing/billing_reference.html#getSkuDetails
         final JSONObject json = new JSONObject();
         json.put("productId", id.code);
+        json.put("type", id.product);
         json.put("price", price);
         json.put("price_amount_micros", detailedPrice.amount);
         json.put("price_currency_code", detailedPrice.currency);
         json.put("title", title);
         json.put("description", description);
+        json.putOpt("subscriptionPeriod", subscriptionPeriod);
+        json.putOpt("freeTrialPeriod", freeTrialPeriod);
+        json.putOpt("introductoryPrice", introductoryPriceOriginal);
+        if (introductoryPrice != null) {
+            json.put("introductoryPriceAmountMicros", introductoryPrice.amount);
+        }
+        json.putOpt("introductoryPricePeriod", introductoryPricePeriod);
+        if (introductoryPriceCycles != -1) {
+            json.put("introductoryPriceCycles", introductoryPriceCycles);
+        }
         return json;
     }
 
@@ -134,6 +193,7 @@ public final class Sku {
     /**
      * This method assumes that SKU's title has the following format: "$title$ ($app_name$)", where
      * $title$ is the SKU's name and $title$ is the application name.
+     *
      * @param title SKU's title
      * @return position in the title where application name begins
      */
@@ -176,7 +236,7 @@ public final class Sku {
         return id.isSubscription();
     }
 
-    public static final class Id {
+    public static final class Id implements Serializable {
         // either “inapp” for in-apps or "subs" for subscriptions.
         public final String product;
         // SKU code
@@ -220,11 +280,11 @@ public final class Sku {
         }
     }
 
-        /**
+    /**
      * Contains detailed information about SKU's price as described <a
      * href="http://developer.android.com/google/play/billing/billing_reference.html#getSkuDetails">here</a>
      */
-    public static final class Price {
+    public static final class Price implements Serializable {
 
         @Nonnull
         public static final Price EMPTY = new Price(0, "");
@@ -244,8 +304,19 @@ public final class Sku {
         }
 
         @Nonnull
-        private static Price fromJson(@Nonnull JSONObject json) throws JSONException {
+        private static Price regularPriceFromJson(@Nonnull JSONObject json) throws JSONException {
             final long amount = json.optLong("price_amount_micros");
+            final String currency = json.optString("price_currency_code");
+            if (amount == 0 || TextUtils.isEmpty(currency)) {
+                return EMPTY;
+            } else {
+                return new Price(amount, currency);
+            }
+        }
+
+        @Nonnull
+        protected static Price introductoryPriceFromJson(@Nonnull JSONObject json) throws JSONException {
+            final long amount = json.optLong("introductoryPriceAmountMicros");
             final String currency = json.optString("price_currency_code");
             if (amount == 0 || TextUtils.isEmpty(currency)) {
                 return EMPTY;
