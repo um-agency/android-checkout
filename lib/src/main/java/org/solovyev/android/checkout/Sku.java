@@ -22,10 +22,12 @@
 
 package org.solovyev.android.checkout;
 
+import android.text.TextUtils;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import android.text.TextUtils;
+import java.io.Serializable;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -35,7 +37,9 @@ import javax.annotation.concurrent.Immutable;
  * SKU object as described <a href="http://developer.android.com/google/play/billing/billing_reference.html#product-details-table">here</a>
  */
 @Immutable
-public final class Sku {
+public final class Sku implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     @Nonnull
     public final Id id;
@@ -170,7 +174,7 @@ public final class Sku {
     }
 
     @Nonnull
-    JSONObject toJsonObject() throws JSONException {
+    public JSONObject toJsonObject() throws JSONException {
         final JSONObject json = new JSONObject();
         json.put("productId", id.code);
         json.put("price", price);
@@ -242,7 +246,10 @@ public final class Sku {
         return id.isSubscription();
     }
 
-    public static final class Id {
+    public static final class Id implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
         // either “inapp” for in-apps or "subs" for subscriptions.
         public final String product;
         // SKU code
@@ -290,7 +297,9 @@ public final class Sku {
      * Contains detailed information about SKU's price as described <a
      * href="http://developer.android.com/google/play/billing/billing_reference.html#getSkuDetails">here</a>
      */
-    public static final class Price {
+    public static final class Price implements Serializable {
+
+        private static final long serialVersionUID = 1L;
 
         @Nonnull
         public static final Price EMPTY = new Price(0, "");
