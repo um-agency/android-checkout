@@ -29,6 +29,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.RemoteException;
@@ -68,6 +69,8 @@ public final class Billing {
 
     static final int V3 = 3;
     static final int V5 = 5;
+    static final int V6 = 6;
+    static final int V7 = 7;
 
     static final long SECOND = 1000L;
     static final long MINUTE = SECOND * 60L;
@@ -979,7 +982,13 @@ public final class Billing {
         public int isBillingSupported(@Nonnull String product, int apiVersion,
                                       @Nonnull RequestListener<Object> listener) {
             Check.isNotEmpty(product);
-            return runWhenConnected(new BillingSupportedRequest(product, apiVersion), wrapListener(listener), mTag);
+            return runWhenConnected(new BillingSupportedRequest(product, apiVersion, null), wrapListener(listener), mTag);
+        }
+
+        @Override
+        public int isBillingSupported(@Nonnull String product, int apiVersion, @Nonnull Bundle extraParams, @Nonnull RequestListener<Object> listener) {
+            Check.isNotEmpty(product);
+            return runWhenConnected(new BillingSupportedRequest(product, apiVersion, extraParams), wrapListener(listener), mTag);
         }
 
         @Override
@@ -1006,10 +1015,27 @@ public final class Billing {
         @Override
         public int getAllPurchases(@Nonnull String product, @Nonnull RequestListener<Purchases> listener) {
             Check.isNotEmpty(product);
-            final GetAllPurchasesListener getAllPurchasesListener = new GetAllPurchasesListener(listener);
             final GetPurchasesRequest request = new GetPurchasesRequest(product, null, mConfiguration.getPurchaseVerifier());
-            getAllPurchasesListener.mRequest = request;
-            return runWhenConnected(request, wrapListener(getAllPurchasesListener), mTag);
+            return runWhenConnected(request, wrapListener(new GetAllPurchasesListener(request, listener)), mTag);
+        }
+
+        @Override
+        public int getPurchaseHistory(@Nonnull String product, @Nullable String continuationToken, @Nullable Bundle extraParams, @Nonnull RequestListener<Purchases> listener) {
+            Check.isNotEmpty(product);
+            return runWhenConnected(new GetPurchaseHistoryRequest(product, continuationToken, extraParams), wrapListener(listener), mTag);
+        }
+
+        @Override
+        public int getWholePurchaseHistory(@Nonnull String product, @Nullable Bundle extraParams, @Nonnull RequestListener<Purchases> listener) {
+            Check.isNotEmpty(product);
+            final GetPurchaseHistoryRequest request = new GetPurchaseHistoryRequest(product, null, extraParams);
+            return runWhenConnected(request, wrapListener(new GetWholePurchaseHistoryListener(request, listener)), mTag);
+        }
+
+        @Override
+        public int isGetPurchaseHistorySupported(@Nonnull String product, @Nonnull RequestListener<Object> listener) {
+            Check.isNotEmpty(product);
+            return isBillingSupported(product, Billing.V6, listener);
         }
 
         @Override
@@ -1033,6 +1059,19 @@ public final class Billing {
             Check.isNotEmpty(product);
             Check.isNotEmpty(sku);
             return runWhenConnected(new PurchaseRequest(product, sku, payload), wrapListener(purchaseFlow), mTag);
+        }
+
+        @Override
+        public int purchase(@Nonnull String product, @Nonnull String sku, @Nullable String payload, @Nullable Bundle extraParams, @Nonnull PurchaseFlow purchaseFlow) {
+            Check.isNotEmpty(product);
+            Check.isNotEmpty(sku);
+            return runWhenConnected(new PurchaseRequest(product, sku, payload, extraParams), wrapListener(purchaseFlow), mTag);
+        }
+
+        @Override
+        public int isPurchaseWithExtraParamsSupported(@Nonnull String product, @Nonnull RequestListener<Object> listener) {
+            Check.isNotEmpty(product);
+            return isBillingSupported(product, Billing.V6, listener);
         }
 
         @Override
@@ -1131,29 +1170,58 @@ public final class Billing {
             }
         }
 
-        private final class GetAllPurchasesListener implements CancellableRequestListener<Purchases> {
+        private final class GetAllPurchasesListener extends BaseAllPurchasesListener {
+
+            GetAllPurchasesListener(@Nonnull GetPurchasesRequest initialRequest, @Nonnull RequestListener<Purchases> listener) {
+                super(initialRequest, listener);
+            }
+
+            @Override
+            protected GetPurchasesRequest makeContinuationRequest(@Nonnull BasePurchasesRequest request, @Nonnull String continuationToken) {
+                return new GetPurchasesRequest((GetPurchasesRequest) request, continuationToken);
+            }
+        }
+
+        private final class GetWholePurchaseHistoryListener extends BaseAllPurchasesListener {
+            GetWholePurchaseHistoryListener(@Nonnull GetPurchaseHistoryRequest initialRequest, @Nonnull RequestListener<Purchases> listener) {
+                super(initialRequest, listener);
+            }
+
+            @Nonnull
+            @Override
+            protected BasePurchasesRequest makeContinuationRequest(@Nonnull BasePurchasesRequest request, @Nonnull String continuationToken) {
+                return new GetPurchaseHistoryRequest((GetPurchaseHistoryRequest) request, continuationToken);
+            }
+        }
+
+        private abstract class BaseAllPurchasesListener implements CancellableRequestListener<Purchases> {
             @Nonnull
             private final RequestListener<Purchases> mListener;
             @Nonnull
             private final List<Purchase> mPurchases = new ArrayList<>();
             @Nonnull
-            private GetPurchasesRequest mRequest;
+            private BasePurchasesRequest mRequest;
 
-            public GetAllPurchasesListener(@Nonnull RequestListener<Purchases> listener) {
-                this.mListener = listener;
+            BaseAllPurchasesListener(@Nonnull BasePurchasesRequest initialRequest, @Nonnull RequestListener<Purchases> listener) {
+                mRequest = initialRequest;
+                mListener = listener;
             }
 
             @Override
             public void onSuccess(@Nonnull Purchases purchases) {
                 mPurchases.addAll(purchases.list);
                 // we need to check continuation token
-                if (purchases.continuationToken == null) {
+                final String continuationToken = purchases.continuationToken;
+                if (continuationToken == null) {
                     mListener.onSuccess(new Purchases(purchases.product, mPurchases, null));
                     return;
                 }
-                mRequest = new GetPurchasesRequest(mRequest, purchases.continuationToken);
+                mRequest = makeContinuationRequest(mRequest, continuationToken);
                 runWhenConnected(mRequest, mTag);
             }
+
+            @Nonnull
+            protected abstract BasePurchasesRequest makeContinuationRequest(@Nonnull BasePurchasesRequest request, @Nonnull String continuationToken);
 
             @Override
             public void onError(int response, @Nonnull Exception e) {
@@ -1175,7 +1243,7 @@ public final class Billing {
         public CachingRequestListener(@Nonnull Request<R> request, @Nonnull RequestListener<R> listener) {
             super(listener);
             Check.isTrue(mCache.hasCache(), "Cache must exist");
-            this.mRequest = request;
+            mRequest = request;
         }
 
         @Override

@@ -29,10 +29,8 @@ import android.app.Service;
 import android.content.Context;
 import android.os.Build;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.Executor;
 
 import javax.annotation.Nonnull;
@@ -108,12 +106,6 @@ public class Checkout {
     protected final Billing mBilling;
     @Nonnull
     final Object mLock = new Object();
-    @GuardedBy("mLock")
-    @Nonnull
-    private final Map<String, Boolean> mSupportedProducts = new HashMap<>();
-    @GuardedBy("mLock")
-    @Nonnull
-    private final Listeners mListeners = new Listeners();
     @Nonnull
     private final OnLoadExecutor mOnLoadExecutor = new OnLoadExecutor();
     @GuardedBy("mLock")
@@ -212,23 +204,8 @@ public class Checkout {
             mState = State.STARTED;
             mBilling.onCheckoutStarted();
             mRequests = mBilling.getRequests(mTag);
-            if (listener != null) {
-                mListeners.add(listener);
-            }
-            for (final String product : ProductTypes.ALL) {
-                mRequests.isBillingSupported(product, new RequestListener<Object>() {
-                    @Override
-                    public void onSuccess(@Nonnull Object result) {
-                        onBillingSupported(product, true);
-                    }
-
-                    @Override
-                    public void onError(int response, @Nonnull Exception e) {
-                        onBillingSupported(product, false);
-                    }
-                });
-            }
         }
+        whenReady(listener == null ? new EmptyListener() {} : listener);
     }
 
     /**
@@ -240,43 +217,42 @@ public class Checkout {
      *
      * @param listener listener which is notified about the initial request's results
      */
-    public void whenReady(@Nonnull Listener listener) {
+    public void whenReady(@Nonnull final Listener listener) {
         Check.isMainThread();
 
         synchronized (mLock) {
-            for (Map.Entry<String, Boolean> entry : mSupportedProducts.entrySet()) {
-                listener.onReady(mRequests, entry.getKey(), entry.getValue());
-            }
+            Check.isNotNull(mRequests);
+            final Billing.Requests requests = mRequests;
 
-            if (isReady()) {
-                checkIsNotStopped();
-                Check.isNotNull(mRequests);
-                listener.onReady(mRequests);
-            } else {
-                // still waiting
-                mListeners.add(listener);
+            @Nonnull
+            final Set<String> loadingProducts = new HashSet<>(ProductTypes.ALL);
+            for (final String product : ProductTypes.ALL) {
+                requests.isBillingSupported(product, new RequestListener<Object>() {
+
+                    private void onBillingSupported(boolean supported) {
+                        listener.onReady(requests, product, supported);
+                        loadingProducts.remove(product);
+                        if (loadingProducts.isEmpty()) {
+                            listener.onReady(requests);
+                        }
+                    }
+
+                    @Override
+                    public void onSuccess(@Nonnull Object result) {
+                        onBillingSupported(true);
+                    }
+
+                    @Override
+                    public void onError(int response, @Nonnull Exception e) {
+                        onBillingSupported(false);
+                    }
+                });
             }
         }
     }
 
     private void checkIsNotStopped() {
         Check.isFalse(mState == State.STOPPED, "Checkout is stopped");
-    }
-
-    private boolean isReady() {
-        Check.isTrue(Thread.holdsLock(mLock), "Should be called from synchronized block");
-        return mSupportedProducts.size() == ProductTypes.ALL.size();
-    }
-
-    private void onBillingSupported(@Nonnull String product, boolean supported) {
-        synchronized (mLock) {
-            mSupportedProducts.put(product, supported);
-            mListeners.onReady(mRequests, product, supported);
-            if (isReady()) {
-                mListeners.onReady(mRequests);
-                mListeners.clear();
-            }
-        }
     }
 
     /**
@@ -328,8 +304,6 @@ public class Checkout {
         Check.isMainThread();
 
         synchronized (mLock) {
-            mSupportedProducts.clear();
-            mListeners.clear();
             if (mState != State.INITIAL) {
                 mState = State.STOPPED;
             }
@@ -341,16 +315,6 @@ public class Checkout {
                 mBilling.onCheckoutStopped();
             }
         }
-    }
-
-    /**
-     * @param product product
-     * @return the last loaded value for the given product
-     */
-    public boolean isBillingSupported(@Nonnull String product) {
-        Check.isTrue(ProductTypes.ALL.contains(product), "Product should be added to the products list");
-        Check.isTrue(mSupportedProducts.containsKey(product), "Billing information is not ready yet");
-        return mSupportedProducts.get(product);
     }
 
     private enum State {
@@ -394,37 +358,6 @@ public class Checkout {
 
         @Override
         public void onReady(@Nonnull BillingRequests requests, @Nonnull String product, boolean billingSupported) {
-        }
-    }
-
-    private static final class Listeners implements Listener {
-        @Nonnull
-        private final List<Listener> mList = new ArrayList<>();
-
-        public void add(@Nonnull Listener l) {
-            if (!mList.contains(l)) {
-                mList.add(l);
-            }
-        }
-
-        @Override
-        public void onReady(@Nonnull BillingRequests requests) {
-            final List<Listener> localList = new ArrayList<>(mList);
-            mList.clear();
-            for (Listener listener : localList) {
-                listener.onReady(requests);
-            }
-        }
-
-        @Override
-        public void onReady(@Nonnull BillingRequests requests, @Nonnull String product, boolean billingSupported) {
-            for (Listener listener : mList) {
-                listener.onReady(requests, product, billingSupported);
-            }
-        }
-
-        public void clear() {
-            mList.clear();
         }
     }
 

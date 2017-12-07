@@ -66,8 +66,8 @@ abstract class Request<R> {
         mId = sCounter.getAndIncrement();
     }
 
-    Request(@Nonnull RequestType type, @Nonnull Request<R> request) {
-        mType = type;
+    Request(@Nonnull Request<R> request) {
+        mType = request.mType;
         mId = request.mId;
         mApiVersion = request.mApiVersion;
         synchronized (request) {
@@ -142,7 +142,8 @@ abstract class Request<R> {
     }
 
     protected void onError(int response) {
-        Billing.error("Error response: " + ResponseCodes.toString(response) + " in " + this + " request");
+        String message = ResponseCodes.toString(response);
+        Billing.error("Error response: " + message + " in " + this + " request");
         onError(response, new BillingException(response));
     }
 
